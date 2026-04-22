@@ -115,7 +115,7 @@ jobs:
           python3 scripts/build-runtime-bundle/build_runtime_bundle.py \
             --version "${APP_VERSION}" \
             --platform "${TARGET_PLATFORM}" \
-            --python-version 3.11.11
+            --python-version 3.11
 
       - name: Generate release manifests
         run: |

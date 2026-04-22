@@ -155,7 +155,7 @@ macOS:
 ```bash
 python3 scripts/build-runtime-bundle/build_runtime_bundle.py \
   --version 0.1.0 \
-  --python-version 3.11.11 \
+  --python-version 3.11 \
   --platform darwin-aarch64
 ```
 
@@ -164,7 +164,7 @@ Windows:
 ```powershell
 py -3 scripts/build-runtime-bundle/build_runtime_bundle.py `
   --version 0.1.0 `
-  --python-version 3.11.11 `
+  --python-version 3.11 `
   --platform windows-x64
 ```
 

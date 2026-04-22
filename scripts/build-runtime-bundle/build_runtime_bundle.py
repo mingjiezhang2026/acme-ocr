@@ -25,7 +25,7 @@ from release_utils import (  # noqa: E402
 )
 
 
-DEFAULT_PYTHON_VERSION = "3.11.11"
+DEFAULT_PYTHON_VERSION = "3.11"
 DEFAULT_GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 PYTHON_ORG_EMBED_URL = "https://www.python.org/ftp/python/{version}/python-{version}-embed-amd64.zip"
 PYTHON_BUILD_STANDALONE_API = "https://api.github.com/repos/astral-sh/python-build-standalone/releases"
@@ -261,14 +261,38 @@ def resolve_pbs_asset_url(
     release_data = latest_pbs_release(release_tag)
     tag_name = str(release_data["tag_name"])
     target = pbs_target(platform_label)
-    pattern = re.compile(
+    exact_pattern = re.compile(
         rf"^cpython-{re.escape(python_version)}\+{re.escape(tag_name)}-{re.escape(target)}-install_only(?:_stripped)?\.(?:tar\.gz|zip)$"
     )
+    prefix_pattern = re.compile(
+        rf"^cpython-(\d+\.\d+\.\d+)\+{re.escape(tag_name)}-{re.escape(target)}-install_only(?:_stripped)?\.(?:tar\.gz|zip)$"
+    )
 
-    for asset in release_data.get("assets", []):
+    assets = list(release_data.get("assets", []))
+    for asset in assets:
         asset_name = str(asset.get("name", ""))
-        if pattern.match(asset_name):
+        if exact_pattern.match(asset_name):
             return str(asset["browser_download_url"]), tag_name
+
+    def parse_version(value: str) -> tuple[int, int, int]:
+        parts = value.split(".")
+        return int(parts[0]), int(parts[1]), int(parts[2])
+
+    prefix = python_version if python_version.count(".") < 2 else ""
+    candidates: list[tuple[tuple[int, int, int], str]] = []
+    for asset in assets:
+        asset_name = str(asset.get("name", ""))
+        match = prefix_pattern.match(asset_name)
+        if not match:
+            continue
+        discovered_version = match.group(1)
+        if prefix and not discovered_version.startswith(f"{prefix}."):
+            continue
+        candidates.append((parse_version(discovered_version), str(asset["browser_download_url"])))
+
+    if candidates:
+        candidates.sort()
+        return candidates[-1][1], tag_name
 
     raise RuntimeError(
         f"Could not find python-build-standalone asset for Python {python_version}, platform {platform_label}, release {tag_name}"
