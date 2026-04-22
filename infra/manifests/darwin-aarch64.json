@@ -1,0 +1,21 @@
+{
+  "platform": "darwin-aarch64",
+  "appVersion": "0.1.0",
+  "runtime": {
+    "version": "0.1.0",
+    "url": "https://github.com/mingjiezhang2026/acme-ocr/releases/download/v0.1.0/runtime-bundle-darwin-aarch64-0.1.0.zip",
+    "sha256": "REPLACE_WITH_REAL_SHA256",
+    "size": 0
+  },
+  "models": [
+    {
+      "name": "ppocr-zh",
+      "version": "0.1.0",
+      "url": "https://github.com/mingjiezhang2026/acme-ocr/releases/download/v0.1.0/model-bundle-ppocr-zh-0.1.0.zip",
+      "sha256": "REPLACE_WITH_REAL_SHA256",
+      "size": 0
+    }
+  ],
+  "features": [],
+  "minAppVersion": "0.1.0"
+}

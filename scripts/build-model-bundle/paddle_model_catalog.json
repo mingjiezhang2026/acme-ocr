@@ -1,0 +1,45 @@
+{
+  "ppocr-zh": {
+    "description": "Chinese OCR bundle based on official PaddleOCR mobile detection/recognition/orientation models.",
+    "upstreamDocs": "https://www.paddleocr.ai/main/en/version3.x/pipeline_usage/OCR.html",
+    "components": [
+      {
+        "name": "det",
+        "artifact": "PP-OCRv4_mobile_det_infer",
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv4_mobile_det_infer.tar"
+      },
+      {
+        "name": "rec",
+        "artifact": "PP-OCRv4_mobile_rec_infer",
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv4_mobile_rec_infer.tar"
+      },
+      {
+        "name": "cls",
+        "artifact": "PP-LCNet_x0_25_textline_ori_infer",
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-LCNet_x0_25_textline_ori_infer.tar"
+      }
+    ]
+  },
+  "ppocr-zh-server": {
+    "description": "Chinese OCR bundle based on official PaddleOCR server/mobile hybrid models.",
+    "upstreamDocs": "https://www.paddleocr.ai/main/en/version3.x/pipeline_usage/OCR.html",
+    "components": [
+      {
+        "name": "det",
+        "artifact": "PP-OCRv5_server_det_infer",
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_server_det_infer.tar"
+      },
+      {
+        "name": "rec",
+        "artifact": "PP-OCRv4_mobile_rec_infer",
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv4_mobile_rec_infer.tar"
+      },
+      {
+        "name": "cls",
+        "artifact": "PP-LCNet_x0_25_textline_ori_infer",
+        "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-LCNet_x0_25_textline_ori_infer.tar"
+      }
+    ]
+  }
+}
+

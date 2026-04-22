@@ -1,0 +1,164 @@
+name: Release macOS DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag, for example v0.1.0"
+        required: true
+        default: "v0.1.0"
+      app_version:
+        description: "Application version, for example 0.1.0"
+        required: true
+        default: "0.1.0"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-model:
+    runs-on: ubuntu-latest
+
+    outputs:
+      release_tag: ${{ steps.vars.outputs.release_tag }}
+      app_version: ${{ steps.vars.outputs.app_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version inputs
+        id: vars
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "release_tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            echo "app_version=${{ inputs.app_version }}" >> "$GITHUB_OUTPUT"
+          else
+            tag="${GITHUB_REF_NAME}"
+            echo "release_tag=${tag}" >> "$GITHUB_OUTPUT"
+            echo "app_version=${tag#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build model bundle
+        run: |
+          python3 scripts/build-model-bundle/build_model_bundle.py \
+            --version "${{ steps.vars.outputs.app_version }}" \
+            --model-key ppocr-zh
+
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-bundle
+          path: |
+            dist/model-bundles/model-bundle-ppocr-zh-${{ steps.vars.outputs.app_version }}.zip
+            dist/model-bundles/model-bundle-ppocr-zh-${{ steps.vars.outputs.app_version }}.zip.sha256
+          if-no-files-found: error
+
+  build-macos:
+    needs: build-model
+    runs-on: macos-14
+
+    env:
+      RELEASE_TAG: ${{ needs.build-model.outputs.release_tag }}
+      APP_VERSION: ${{ needs.build-model.outputs.app_version }}
+      OWNER: mingjiezhang2026
+      REPO: acme-ocr
+      TARGET_PLATFORM: darwin-aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model-bundle
+          path: dist/model-bundles
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.11.0 --activate
+          pnpm --version
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+          sh /tmp/rustup-init.sh -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustc" --version
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build runtime bundle
+        run: |
+          python3 scripts/build-runtime-bundle/build_runtime_bundle.py \
+            --version "${APP_VERSION}" \
+            --platform "${TARGET_PLATFORM}" \
+            --python-version 3.11.11
+
+      - name: Generate release manifests
+        run: |
+          python3 scripts/generate-manifests/generate_manifests.py \
+            --owner "${OWNER}" \
+            --repo "${REPO}" \
+            --tag "${RELEASE_TAG}" \
+            --app-version "${APP_VERSION}" \
+            --runtime "${TARGET_PLATFORM}=dist/runtime-bundles/runtime-bundle-${TARGET_PLATFORM}-${APP_VERSION}.zip" \
+            --model "ppocr-zh=dist/model-bundles/model-bundle-ppocr-zh-${APP_VERSION}.zip"
+
+      - name: Build DMG
+        env:
+          VITE_ACME_OCR_AUTO_BOOTSTRAP: "true"
+          VITE_ACME_OCR_MANIFEST_URL: "https://github.com/${{ env.OWNER }}/${{ env.REPO }}/releases/download/${{ env.RELEASE_TAG }}/${{ env.TARGET_PLATFORM }}.json"
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          pnpm --dir apps/desktop tauri build -- --bundles dmg
+
+      - name: Collect release files
+        shell: bash
+        run: |
+          mkdir -p dist/release-assets
+          cp "dist/runtime-bundles/runtime-bundle-${TARGET_PLATFORM}-${APP_VERSION}.zip" dist/release-assets/
+          cp "dist/runtime-bundles/runtime-bundle-${TARGET_PLATFORM}-${APP_VERSION}.zip.sha256" dist/release-assets/
+          cp "dist/model-bundles/model-bundle-ppocr-zh-${APP_VERSION}.zip" dist/release-assets/
+          cp "dist/model-bundles/model-bundle-ppocr-zh-${APP_VERSION}.zip.sha256" dist/release-assets/
+          cp "dist/release-manifests/${TARGET_PLATFORM}.json" "dist/release-assets/${TARGET_PLATFORM}.json"
+          find apps/desktop/src-tauri/target/release/bundle/dmg -name "*.dmg" -maxdepth 1 -exec cp {} dist/release-assets/ \;
+
+      - name: Upload macOS release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-assets
+          path: dist/release-assets/*
+          if-no-files-found: error
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            dist/release-assets/*
+          draft: false
+          generate_release_notes: true

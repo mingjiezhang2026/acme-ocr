@@ -1,0 +1,12 @@
+{
+  "name": "acme-ocr",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "dev:desktop": "pnpm --dir apps/desktop tauri dev",
+    "build:desktop": "pnpm --dir apps/desktop tauri build",
+    "lint:desktop": "pnpm --dir apps/desktop lint"
+  }
+}
+
