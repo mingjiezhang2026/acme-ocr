@@ -33,7 +33,7 @@ PYTHON_BUILD_STANDALONE_KNOWN_ASSETS = {
     ("darwin-aarch64", "3.11"): (
         "20260408",
         "https://github.com/astral-sh/python-build-standalone/releases/download/20260408/"
-        "cpython-3.11.15%2B20260408-aarch64-apple-darwin-install_only.tar.gz",
+        "cpython-3.11.15%2B20260408-aarch64-apple-darwin-install_only_stripped.tar.gz",
     ),
 }
 
