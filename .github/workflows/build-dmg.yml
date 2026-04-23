@@ -134,7 +134,7 @@ jobs:
           VITE_ACME_OCR_MANIFEST_URL: "https://github.com/${{ env.OWNER }}/${{ env.REPO }}/releases/download/${{ env.RELEASE_TAG }}/${{ env.TARGET_PLATFORM }}.json"
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
-          pnpm --dir apps/desktop tauri build -- --bundles dmg
+          pnpm --dir apps/desktop tauri build --bundles dmg
 
       - name: Collect release files
         shell: bash
