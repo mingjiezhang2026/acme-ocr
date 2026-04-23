@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use state::AppRuntimeState;
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -24,6 +24,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const WORKER_PORT: u16 = 47861;
 const INSTALLED_FILE: &str = "installed.json";
+const HTTP_USER_AGENT: &str = "AcmeOCR/0.1";
+const NETWORK_RETRIES: usize = 4;
 
 #[tauri::command]
 fn get_app_overview(app: AppHandle, state: State<'_, AppRuntimeState>) -> Result<AppOverview, String> {
@@ -282,6 +284,17 @@ async fn start_worker_impl(app: &AppHandle, state: &State<'_, AppRuntimeState>) 
     )?;
 
     let (python_executable, worker_script) = resolve_worker_launch_targets(&paths)?;
+    ensure_launch_permissions(&python_executable, &worker_script)?;
+    append_log(
+        &worker_log,
+        &format!(
+            "[{}] launch targets python={} script={}",
+            Utc::now().to_rfc3339(),
+            python_executable.display(),
+            worker_script.display()
+        ),
+    )?;
+
     let stdout = OpenOptions::new()
         .create(true)
         .append(true)
@@ -322,7 +335,7 @@ async fn start_worker_impl(app: &AppHandle, state: &State<'_, AppRuntimeState>) 
         *worker = Some(child);
     }
 
-    if let Err(error) = wait_for_worker_health(WORKER_PORT).await {
+    if let Err(error) = wait_for_worker_health_or_exit(WORKER_PORT, state, &worker_log).await {
         let _ = stop_worker_impl(app, state);
         return Err(error);
     }
@@ -500,9 +513,30 @@ fn current_platform_label() -> AppResult<String> {
 }
 
 async fn fetch_manifest(manifest_url: &str) -> AppResult<RuntimeManifest> {
-    let response = reqwest::get(manifest_url).await?.error_for_status()?;
-    let manifest = response.json::<RuntimeManifest>().await?;
-    Ok(manifest)
+    let client = reqwest::Client::builder()
+        .user_agent(HTTP_USER_AGENT)
+        .timeout(Duration::from_secs(45))
+        .build()?;
+
+    let mut last_error = String::new();
+    for attempt in 1..=NETWORK_RETRIES {
+        match client.get(manifest_url).send().await {
+            Ok(response) => match response.error_for_status() {
+                Ok(response) => return Ok(response.json::<RuntimeManifest>().await?),
+                Err(error) => last_error = error.to_string(),
+            },
+            Err(error) => last_error = error.to_string(),
+        }
+
+        if attempt < NETWORK_RETRIES {
+            tokio::time::sleep(retry_delay(attempt)).await;
+        }
+    }
+
+    Err(AppError(format!(
+        "manifest 拉取失败，已重试 {} 次: {}",
+        NETWORK_RETRIES, last_error
+    )))
 }
 
 async fn download_with_progress(
@@ -513,7 +547,51 @@ async fn download_with_progress(
     from: f32,
     to: f32,
 ) -> AppResult<PathBuf> {
-    let response = reqwest::get(&resource.url).await?.error_for_status()?;
+    let client = reqwest::Client::builder()
+        .user_agent(HTTP_USER_AGENT)
+        .timeout(Duration::from_secs(60 * 60))
+        .build()?;
+
+    let mut last_error = String::new();
+    for attempt in 1..=NETWORK_RETRIES {
+        let _ = fs::remove_file(target);
+        match download_with_progress_once(&client, app, resource, target, stage, from, to).await {
+            Ok(path) => return Ok(path),
+            Err(error) => last_error = error.to_string(),
+        }
+
+        if attempt < NETWORK_RETRIES {
+            emit_progress(
+                app,
+                stage,
+                &format!(
+                    "下载失败，正在重试 {}/{}: {}",
+                    attempt + 1,
+                    NETWORK_RETRIES,
+                    last_error
+                ),
+                Some(from),
+            )?;
+            tokio::time::sleep(retry_delay(attempt)).await;
+        }
+    }
+
+    Err(AppError(format!(
+        "下载失败，已重试 {} 次: {}",
+        NETWORK_RETRIES, last_error
+    )))
+}
+
+async fn download_with_progress_once(
+    client: &reqwest::Client,
+    app: &AppHandle,
+    resource: &BootstrapResource,
+    target: &Path,
+    stage: &str,
+    from: f32,
+    to: f32,
+) -> AppResult<PathBuf> {
+    let response = client.get(&resource.url).send().await?.error_for_status()?;
     let total = response.content_length().or(resource.size).unwrap_or(0);
     let mut stream = response.bytes_stream();
     let file = File::create(target)?;
@@ -541,6 +619,16 @@ async fn download_with_progress(
     Ok(target.to_path_buf())
 }
 
+fn retry_delay(attempt: usize) -> Duration {
+    let seconds = match attempt {
+        1 => 1,
+        2 => 3,
+        3 => 7,
+        _ => 12,
+    };
+    Duration::from_secs(seconds)
+}
+
 fn verify_sha256(file: &Path, expected: &str) -> AppResult<()> {
     let mut sha = Sha256::new();
     let mut input = File::open(file)?;
@@ -565,11 +653,35 @@ fn verify_sha256(file: &Path, expected: &str) -> AppResult<()> {
 }
 
 fn replace_directory(target_dir: &Path, archive_file: &Path) -> AppResult<()> {
+    let parent = target_dir
+        .parent()
+        .ok_or_else(|| AppError(format!("无法解析安装目录父级: {}", target_dir.display())))?;
+    fs::create_dir_all(parent)?;
+
+    let directory_name = target_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("bundle");
+    let temp_dir = parent.join(format!(
+        ".{}.installing-{}",
+        directory_name,
+        Utc::now().timestamp_millis()
+    ));
+
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)?;
+    }
+    fs::create_dir_all(&temp_dir)?;
+
+    if let Err(error) = unzip_archive(archive_file, &temp_dir) {
+        let _ = fs::remove_dir_all(&temp_dir);
+        return Err(error);
+    }
+
     if target_dir.exists() {
         fs::remove_dir_all(target_dir)?;
     }
-    fs::create_dir_all(target_dir)?;
-    unzip_archive(archive_file, target_dir)?;
+    fs::rename(&temp_dir, target_dir)?;
     Ok(())
 }
 
@@ -595,23 +707,38 @@ fn unzip_archive(archive_file: &Path, target_dir: &Path) -> AppResult<()> {
 
         let mut output = File::create(&output_path)?;
         std::io::copy(&mut zipped, &mut output)?;
+        restore_unix_permissions(&output_path, zipped.unix_mode())?;
     }
 
+    Ok(())
+}
+
+#[cfg(unix)]
+fn restore_unix_permissions(path: &Path, mode: Option<u32>) -> AppResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if let Some(mode) = mode {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restore_unix_permissions(_path: &Path, _mode: Option<u32>) -> AppResult<()> {
     Ok(())
 }
 
 fn resolve_worker_launch_targets(paths: &AppPaths) -> AppResult<(PathBuf, PathBuf)> {
     let runtime_dir = PathBuf::from(&paths.runtime_dir);
     let installed_script = runtime_dir.join("worker").join("main.py");
-    let fallback_script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../services/ocr-worker/main.py")
-        .canonicalize()
-        .context("未找到开发模式 Worker 入口")?;
 
     let worker_script = if installed_script.exists() {
         installed_script
     } else {
-        fallback_script
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../services/ocr-worker/main.py")
+            .canonicalize()
+            .context("未找到已安装 Worker，也未找到开发模式 Worker 入口")?
     };
 
     let candidates = [
@@ -635,6 +762,33 @@ fn resolve_worker_launch_targets(paths: &AppPaths) -> AppResult<(PathBuf, PathBu
     Ok((fallback_python, worker_script))
 }
 
+fn ensure_launch_permissions(python_executable: &Path, worker_script: &Path) -> AppResult<()> {
+    ensure_executable_permission(python_executable)?;
+    ensure_executable_permission(worker_script)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_executable_permission(path: &Path) -> AppResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if path.exists() {
+        let metadata = fs::metadata(path)?;
+        let mut permissions = metadata.permissions();
+        let mode = permissions.mode();
+        if mode & 0o111 == 0 {
+            permissions.set_mode(mode | 0o755);
+            fs::set_permissions(path, permissions)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_executable_permission(_path: &Path) -> AppResult<()> {
+    Ok(())
+}
+
 async fn wait_for_worker_health(port: u16) -> AppResult<()> {
     let endpoint = format!("http://127.0.0.1:{}/health", port);
 
@@ -646,6 +800,67 @@ async fn wait_for_worker_health(port: u16) -> AppResult<()> {
     }
 
     Err(AppError("Worker 启动超时，/health 未就绪".into()))
+}
+
+async fn wait_for_worker_health_or_exit(
+    port: u16,
+    state: &State<'_, AppRuntimeState>,
+    worker_log: &Path,
+) -> AppResult<()> {
+    let endpoint = format!("http://127.0.0.1:{}/health", port);
+    let client = reqwest::Client::builder()
+        .user_agent(HTTP_USER_AGENT)
+        .timeout(Duration::from_secs(3))
+        .build()?;
+
+    for _ in 0..60 {
+        match client.get(&endpoint).send().await {
+            Ok(response) if response.status().is_success() => return Ok(()),
+            _ => {}
+        }
+
+        {
+            let mut worker = state.worker.lock().map_err(|_| AppError("worker 状态锁失败".into()))?;
+            let exited_status = if let Some(child) = worker.as_mut() {
+                child.try_wait()?
+            } else {
+                None
+            };
+
+            if let Some(status) = exited_status {
+                *worker = None;
+                let tail = read_log_tail(worker_log, 4096).unwrap_or_default();
+                return Err(AppError(format!(
+                    "Worker 进程已退出: {}。请查看日志 {}{}",
+                    status,
+                    worker_log.display(),
+                    if tail.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n最近日志:\n{}", tail)
+                    }
+                )));
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    Err(AppError(format!(
+        "Worker 启动超时，/health 未就绪。请查看日志 {}",
+        worker_log.display()
+    )))
+}
+
+fn read_log_tail(path: &Path, max_bytes: u64) -> AppResult<String> {
+    let mut file = File::open(path)?;
+    let length = file.metadata()?.len();
+    let start = length.saturating_sub(max_bytes);
+    file.seek(SeekFrom::Start(start))?;
+
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    Ok(String::from_utf8_lossy(&buffer).to_string())
 }
 
 pub fn run() {
