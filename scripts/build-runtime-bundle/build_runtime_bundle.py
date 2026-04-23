@@ -29,6 +29,13 @@ DEFAULT_PYTHON_VERSION = "3.11"
 DEFAULT_GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 PYTHON_ORG_EMBED_URL = "https://www.python.org/ftp/python/{version}/python-{version}-embed-amd64.zip"
 PYTHON_BUILD_STANDALONE_API = "https://api.github.com/repos/astral-sh/python-build-standalone/releases"
+PYTHON_BUILD_STANDALONE_KNOWN_ASSETS = {
+    ("darwin-aarch64", "3.11"): (
+        "20260414",
+        "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/"
+        "cpython-3.11.13%2B20260414-aarch64-apple-darwin-install_only.tar.gz",
+    ),
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -253,6 +260,21 @@ def latest_pbs_release(tag_or_latest: str) -> dict[str, object]:
     return fetch_json(f"{PYTHON_BUILD_STANDALONE_API}/latest")
 
 
+def known_pbs_asset_url(
+    python_version: str,
+    platform_label: str,
+    release_tag: str,
+) -> tuple[str, str] | None:
+    if release_tag not in {"latest", "20260414"}:
+        return None
+
+    normalized_python_version = python_version
+    if python_version.count(".") >= 2:
+        normalized_python_version = ".".join(python_version.split(".")[:2])
+
+    return PYTHON_BUILD_STANDALONE_KNOWN_ASSETS.get((platform_label, normalized_python_version))
+
+
 def resolve_pbs_asset_url(
     python_version: str,
     platform_label: str,
@@ -352,7 +374,11 @@ def acquire_python_from_pbs(
         url = source_url
         resolved_release = release_tag
     else:
-        url, resolved_release = resolve_pbs_asset_url(python_version, platform_label, release_tag)
+        known_asset = known_pbs_asset_url(python_version, platform_label, release_tag)
+        if known_asset is not None:
+            resolved_release, url = known_asset
+        else:
+            url, resolved_release = resolve_pbs_asset_url(python_version, platform_label, release_tag)
 
     archive_path = download_file(
         url,
