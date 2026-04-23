@@ -115,7 +115,8 @@ jobs:
           python3 scripts/build-runtime-bundle/build_runtime_bundle.py \
             --version "${APP_VERSION}" \
             --platform "${TARGET_PLATFORM}" \
-            --python-version 3.11
+            --python-version 3.11 \
+            --python-source-url "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.11.13%2B20260414-aarch64-apple-darwin-install_only.tar.gz"
 
       - name: Generate release manifests
         run: |

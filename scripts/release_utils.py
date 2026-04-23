@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -47,12 +48,17 @@ def download_file(url: str, target: Path, force: bool = False) -> Path:
 
 
 def fetch_json(url: str) -> dict[str, object]:
+    token = os.getenv("GITHUB_TOKEN")
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/vnd.github+json, application/json",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     request = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "application/vnd.github+json, application/json",
-        },
+        headers=headers,
     )
     with urllib.request.urlopen(request) as response:
         return json.loads(response.read().decode("utf-8"))

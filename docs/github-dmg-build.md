@@ -70,6 +70,7 @@ git push origin v0.1.0
 - 当前 workflow 以 `darwin-aarch64` 为主，也就是 Apple Silicon 版本
 - 生成的 `.dmg` 在构建时会把 manifest URL 指向同一个 GitHub Release 下的 `darwin-aarch64.json`
 - 也就是说，安装后的应用首次打开时，会自动从同一条 Release 链路下载 runtime/model 资源
+- workflow 里固定传入了 `python-build-standalone` 的官方 asset 直链，避免匿名 GitHub API 查询触发 rate limit
 - 如果以后要支持 Intel Mac，可以再补 `darwin-x64` 的构建 job
 
 ## 一句话
