@@ -31,9 +31,9 @@ PYTHON_ORG_EMBED_URL = "https://www.python.org/ftp/python/{version}/python-{vers
 PYTHON_BUILD_STANDALONE_API = "https://api.github.com/repos/astral-sh/python-build-standalone/releases"
 PYTHON_BUILD_STANDALONE_KNOWN_ASSETS = {
     ("darwin-aarch64", "3.11"): (
-        "20260414",
-        "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/"
-        "cpython-3.11.13%2B20260414-aarch64-apple-darwin-install_only.tar.gz",
+        "20260408",
+        "https://github.com/astral-sh/python-build-standalone/releases/download/20260408/"
+        "cpython-3.11.15%2B20260408-aarch64-apple-darwin-install_only.tar.gz",
     ),
 }
 
@@ -265,7 +265,7 @@ def known_pbs_asset_url(
     platform_label: str,
     release_tag: str,
 ) -> tuple[str, str] | None:
-    if release_tag not in {"latest", "20260414"}:
+    if release_tag not in {"latest", "20260408"}:
         return None
 
     normalized_python_version = python_version

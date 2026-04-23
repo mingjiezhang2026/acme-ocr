@@ -116,7 +116,7 @@ jobs:
             --version "${APP_VERSION}" \
             --platform "${TARGET_PLATFORM}" \
             --python-version 3.11 \
-            --python-source-url "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.11.13%2B20260414-aarch64-apple-darwin-install_only.tar.gz"
+            --python-source-url "https://github.com/astral-sh/python-build-standalone/releases/download/20260408/cpython-3.11.15%2B20260408-aarch64-apple-darwin-install_only.tar.gz"
 
       - name: Generate release manifests
         run: |
